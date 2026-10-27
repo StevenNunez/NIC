@@ -1,0 +1,33 @@
+{
+  "name": "nic",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:worker": "wrangler dev --test-scheduled",
+    "build": "vite build",
+    "typecheck": "wrangler types && tsc -p tsconfig.worker.json && tsc -p tsconfig.json",
+    "deploy": "npm run build && wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply nic --local",
+    "db:migrate:remote": "wrangler d1 migrations apply nic --remote",
+    "setup:env": "node scripts/init-env.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.154.0"
+  }
+}

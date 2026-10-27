@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "nic",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-27",
+
+  // Un solo Worker: la API, la tarea programada y la app (PWA) como archivos estáticos.
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // /api/* pasa por el Worker; todo lo demás lo sirve Cloudflare directo.
+    "run_worker_first": ["/api/*"]
+  },
+
+  // Se despierta cada minuto; worker/schedule.ts decide si toca revisar NIC
+  // (día: cada minuto, noche: cada 15) según la hora de Chile.
+  "triggers": { "crons": ["* * * * *"] },
+
+  // Sin database_id: Wrangler la crea sola en el primer deploy.
+  "d1_databases": [
+    { "binding": "DB", "database_name": "nic", "migrations_dir": "migrations" }
+  ],
+
+  "vars": {
+    "VAPID_SUBJECT": "https://www.teolabs.app"
+  },
+
+  // Se cargan con `wrangler secret put` (producción) o .dev.vars (local).
+  "secrets": {
+    "required": ["APP_PASSWORD", "SESSION_SECRET", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY"]
+  },
+
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+.env
+.env.*
+worker-configuration.d.ts
+
+# Material interno / de asistente: no va al repo (solo lo que corre en producción)
+CLAUDE.md
+.claude/
+PLAN.md
+NOTAS*.md
