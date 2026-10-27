@@ -19,3 +19,34 @@ export function clock(ms: number): string {
     hourCycle: "h23",
   }).format(ms);
 }
+
+/** "26 dic 2026, 20:07" en hora de Chile. */
+export function dateTime(ms: number): string {
+  return new Intl.DateTimeFormat("es-CL", {
+    timeZone: "America/Santiago",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(ms);
+}
+
+/** Días enteros entre dos fechas (calendario de Chile, no 24 h corridas). */
+function dayNumber(ms: number): number {
+  const p = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago" }).format(ms); // YYYY-MM-DD
+  return Math.floor(Date.parse(`${p}T00:00:00Z`) / 86400_000);
+}
+
+export function daysUntil(ms: number, now = Date.now()): number {
+  return dayNumber(ms) - dayNumber(now);
+}
+
+export function countdown(expiresAt: number, now = Date.now()): string {
+  const d = daysUntil(expiresAt, now);
+  if (d > 1) return `faltan ${d} días`;
+  if (d === 1) return "vence mañana";
+  if (d === 0) return expiresAt > now ? "vence hoy" : "venció hoy";
+  return d === -1 ? "venció ayer" : `venció hace ${-d} días`;
+}

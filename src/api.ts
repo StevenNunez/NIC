@@ -22,6 +22,12 @@ export interface WatchRow {
   createdAt: number;
   notifiedAt: number | null;
   seenAt: number | null;
+  /** Lo que NIC dice del dominio (whois): estado, creación y vencimiento. */
+  whoisState: "registered" | "available" | "unknown" | null;
+  createdOn: number | null;
+  expiresAt: number | null;
+  whoisCheckedAt: number | null;
+  whoisNote: string | null;
 }
 
 export interface PollInfo {

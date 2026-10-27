@@ -1,6 +1,7 @@
 import { fetchWeeklyList } from "./nic.ts";
 import { notifyAll } from "./notify.ts";
 import { inDigestWindow, santiagoTime } from "./schedule.ts";
+import { alertDomain } from "./watch.ts";
 
 export interface PollResult {
   ok: boolean;
@@ -58,21 +59,7 @@ async function alertWatchlist(env: Env, listJson: string, now: number): Promise<
     .all<{ name: string }>();
 
   let alerts = 0;
-  for (const { name } of results) {
-    // Se marca antes de enviar para que dos pasadas seguidas no manden el mismo aviso.
-    const claimed = await env.DB.prepare("UPDATE watchlist SET notified_at = ?2 WHERE name = ?1 AND notified_at IS NULL")
-      .bind(name, now)
-      .run();
-    if (!claimed.meta.changes) continue;
-
-    const delivered = await notifyAll(
-      env,
-      { title: `🔔 ${name} está disponible`, body: "NIC lo liberó. Toca para inscribirlo antes que otro.", url: `/?d=${encodeURIComponent(name)}`, tag: `watch-${name}` },
-      "high",
-    );
-    if (delivered > 0) alerts++;
-    else await env.DB.prepare("UPDATE watchlist SET notified_at = NULL WHERE name = ?1").bind(name).run(); // nadie lo recibió: reintenta
-  }
+  for (const { name } of results) if (await alertDomain(env, name, now)) alerts++;
   return alerts;
 }
 

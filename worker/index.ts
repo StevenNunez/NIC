@@ -2,6 +2,7 @@ import { normalizeDomain } from "../shared/domain.ts";
 import { allowLoginAttempt, checkPassword, clearSessionCookie, isAuthenticated, makeSessionCookie } from "./auth.ts";
 import { notifyAll } from "./notify.ts";
 import { runPoll } from "./poll.ts";
+import { refreshDueWhois, refreshWhois } from "./watch.ts";
 import { DAY_END_HOUR, DAY_START_HOUR, NIGHT_EVERY_MIN, isDaytime, santiagoTime, shouldPoll } from "./schedule.ts";
 
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
@@ -44,7 +45,7 @@ export default {
 
   async scheduled(controller, env, ctx): Promise<void> {
     if (!shouldPoll(santiagoTime(new Date(controller.scheduledTime)))) return;
-    ctx.waitUntil(runPoll(env));
+    ctx.waitUntil(Promise.all([runPoll(env), refreshDueWhois(env)]));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -76,6 +77,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (method === "DELETE") return removeWatch(request, env);
     if (method === "PATCH") return rearmWatch(request, env);
   }
+  if (path === "/api/watchlist/refresh" && method === "POST") return refreshWatch(request, env);
   if (path === "/api/push/key" && method === "GET") return json({ publicKey: env.VAPID_PUBLIC_KEY });
   if (path === "/api/push/subscribe") {
     if (method === "POST") return subscribe(request, env);
@@ -179,7 +181,9 @@ async function patchDomain(request: Request, env: Env, name: string): Promise<Re
 
 async function getWatchlist(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
-    `SELECT w.name, w.created_at AS createdAt, w.notified_at AS notifiedAt, d.first_seen_at AS seenAt
+    `SELECT w.name, w.created_at AS createdAt, w.notified_at AS notifiedAt, d.first_seen_at AS seenAt,
+            w.whois_state AS whoisState, w.created_on AS createdOn, w.expires_at AS expiresAt,
+            w.whois_checked_at AS whoisCheckedAt, w.whois_note AS whoisNote
      FROM watchlist w LEFT JOIN domains d ON d.name = w.name ORDER BY w.created_at DESC`,
   ).all();
   return json({ rows: results });
@@ -194,6 +198,9 @@ async function addWatch(request: Request, env: Env): Promise<Response> {
   await env.DB.prepare("INSERT OR IGNORE INTO watchlist (name, created_at) VALUES (?1, ?2)").bind(name, Date.now()).run();
   // Si NIC ya lo tiene en su lista, la próxima revisión (máx. 1 min de día) lo avisa sola:
   // el aviso compara contra la lista actual de NIC, no contra el historial guardado.
+  // Se consulta a NIC al tiro para mostrar la fecha de vencimiento; si NIC no responde,
+  // el dominio igual queda vigilado y la próxima pasada reintenta.
+  await refreshWhois(env, name).catch((err) => console.error(JSON.stringify({ evt: "whois_failed", name, error: String(err) })));
   return json({ ok: true, name });
 }
 
@@ -203,6 +210,19 @@ async function removeWatch(request: Request, env: Env): Promise<Response> {
   if (!name) return bad("Dominio inválido");
   await env.DB.prepare("DELETE FROM watchlist WHERE name = ?1").bind(name).run();
   return json({ ok: true });
+}
+
+async function refreshWatch(request: Request, env: Env): Promise<Response> {
+  const data = await body<{ name?: string }>(request);
+  const name = normalizeDomain(data?.name ?? "");
+  if (!name) return bad("Dominio inválido");
+  const exists = await env.DB.prepare("SELECT 1 AS x FROM watchlist WHERE name = ?1").bind(name).first();
+  if (!exists) return bad("Ese dominio no está en tu vigilancia", 404);
+  try {
+    return json({ ok: true, ...(await refreshWhois(env, name)) });
+  } catch (err) {
+    return bad(`NIC no respondió: ${err instanceof Error ? err.message : err}`, 502);
+  }
 }
 
 async function rearmWatch(request: Request, env: Env): Promise<Response> {

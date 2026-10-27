@@ -389,6 +389,35 @@ select {
   margin-left: auto;
 }
 
+.nic-info {
+  display: grid;
+  gap: 2px;
+}
+
+.expiry {
+  font-size: 0.98rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.expiry span:first-child {
+  color: var(--muted);
+}
+
+.expiry.over {
+  color: var(--gold);
+}
+
+.chip-days {
+  padding: 2px 9px;
+  background: var(--surface-2);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
 .empty {
   text-align: center;
   color: var(--muted);

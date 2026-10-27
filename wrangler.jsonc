@@ -4,6 +4,10 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-27",
 
+  // Solo la dirección principal: sin URLs de vista previa que compartirían secretos y base de datos.
+  "workers_dev": true,
+  "preview_urls": false,
+
   // Un solo Worker: la API, la tarea programada y la app (PWA) como archivos estáticos.
   "assets": {
     "directory": "./dist",
