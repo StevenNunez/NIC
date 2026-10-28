@@ -74,3 +74,15 @@ export function ageShort(ms: number, now = Date.now()): string {
   const h = Math.round(m / 60);
   return h < 24 ? `T+${h}h` : `T+${Math.round(h / 24)}d`;
 }
+
+/** "2002–2026" (o solo "2014" si es un único año). */
+export function yearRange(first: number, last: number): string {
+  const a = new Date(first).getUTCFullYear();
+  const b = new Date(last).getUTCFullYear();
+  return a === b ? String(a) : `${a}–${b}`;
+}
+
+/** Qué tan larga es la historia, para darle un nombre al número de años. */
+export function historyLevel(years: number): "larga" | "media" | "corta" {
+  return years >= 10 ? "larga" : years >= 3 ? "media" : "corta";
+}

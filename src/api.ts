@@ -15,6 +15,10 @@ export interface DomainRow {
   len: number;
   baseline: number;
   watched: number;
+  /** Años de historia en archive.org: null = sin revisar, 0 = sin capturas. */
+  wbYears: number | null;
+  wbFirst: number | null;
+  wbLast: number | null;
 }
 
 export interface WatchRow {
@@ -28,6 +32,21 @@ export interface WatchRow {
   expiresAt: number | null;
   whoisCheckedAt: number | null;
   whoisNote: string | null;
+}
+
+export interface LookupRow {
+  name: string;
+  whoisState: "registered" | "available" | "unknown" | null;
+  expiresAt: number | null;
+  createdOn: number | null;
+  note: string | null;
+  wbFirst: number | null;
+  wbLast: number | null;
+  /** null: archive.org no respondió, no se sabe. */
+  wbYears: number | null;
+  checkedAt: number;
+  watched?: number;
+  problems?: string[];
 }
 
 export interface EventRow {
@@ -50,12 +69,17 @@ export interface Stats {
   total: number;
   last24h: number;
   tracked: number;
+  archive: { checked: number; withHistory: number; alerts24h: number };
   byHour: number[];
   lastPoll: PollInfo | null;
   devices: number;
   releaseLag: { n: number; minDays: number | null; maxDays: number | null; avgDays: number | null } | null;
   watching: number;
   schedule: { daytime: boolean; dayStart: number; dayEnd: number; nightEveryMin: number };
+}
+
+export interface Settings {
+  historyAlert: { enabled: boolean; minYears: number; maxPer24h: number };
 }
 
 export const UNAUTHORIZED_EVENT = "nic:unauthorized";

@@ -35,6 +35,17 @@ const rows = [...names].map((name, i) => {
   return `INSERT OR IGNORE INTO domains (name, first_seen_at, first_seen_hour, baseline, status) VALUES ('${name}', ${at}, ${hour}, 0, '${status}');`;
 });
 
+// Historia en archive.org para parte de los dominios (el resto queda "sin revisar", como en producción al inicio).
+const wbRows = [...names].flatMap((name) => {
+  if (rnd() > 0.35) return [];
+  const years = 1 + Math.floor(rnd() * 18);
+  const first = 2003 + Math.floor(rnd() * 8);
+  const last = Math.min(2025, first + years - 1);
+  const f = Date.UTC(first, Math.floor(rnd() * 12), 1 + Math.floor(rnd() * 27));
+  const l = Date.UTC(last, Math.floor(rnd() * 12), 1 + Math.floor(rnd() * 27));
+  return [`UPDATE domains SET wb_checked_at = ${now}, wb_first = ${f}, wb_last = ${l}, wb_years = ${last - first + 1} WHERE name = '${name}';`];
+});
+
 const DAY = 86400_000;
 const ev = (name, at, kind, detail) =>
   `INSERT INTO watch_events (name, at, kind, detail) VALUES ('${name}', ${at}, '${kind}', ${detail ? `'${JSON.stringify(detail)}'` : "NULL"});`;
@@ -51,6 +62,12 @@ const pitutoExpires = releasedAt - 31 * DAY;
 
 const sql = [
   ...rows,
+  ...wbRows,
+  // Consultas hechas a mano en la sección "el dominio ya no existe".
+  "DELETE FROM lookups WHERE name IN ('tiendaalpina.cl', 'panaderiasur.cl', 'nuncaexistio-demo.cl');",
+  `INSERT INTO lookups (name, whois_state, expires_at, created_on, wb_first, wb_last, wb_years, checked_at, created_at) VALUES ('tiendaalpina.cl', 'available', NULL, NULL, ${Date.UTC(2009, 5, 3)}, ${Date.UTC(2021, 10, 18)}, 13, ${now - 600_000}, ${now - 600_000});`,
+  `INSERT INTO lookups (name, whois_state, expires_at, created_on, wb_first, wb_last, wb_years, checked_at, created_at) VALUES ('panaderiasur.cl', 'registered', ${now + 47 * 86400_000}, ${Date.UTC(2012, 2, 9)}, ${Date.UTC(2012, 4, 20)}, ${Date.UTC(2026, 8, 2)}, 15, ${now - 3 * 3600_000}, ${now - 3 * 3600_000});`,
+  `INSERT INTO lookups (name, whois_state, expires_at, created_on, wb_first, wb_last, wb_years, checked_at, created_at) VALUES ('nuncaexistio-demo.cl', 'available', NULL, NULL, NULL, NULL, 0, ${now - 86400_000}, ${now - 86400_000});`,
   `DELETE FROM watch_events WHERE name IN (${demoNames.map((n) => `'${n}'`).join(",")});`,
   `DELETE FROM watch_reminders WHERE name IN (${demoNames.map((n) => `'${n}'`).join(",")});`,
 

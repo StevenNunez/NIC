@@ -2,6 +2,8 @@ import { fetchWeeklyList } from "./nic.ts";
 import { notifyAll } from "./notify.ts";
 import { inDigestWindow, santiagoTime } from "./schedule.ts";
 import { recordEvent } from "./events.ts";
+import { digestHistoryLine } from "./history-alerts.ts";
+import { getSettings } from "./settings.ts";
 import { alertDomain } from "./watch.ts";
 
 export interface PollResult {
@@ -85,9 +87,20 @@ async function maybeSendDigest(env: Env, now: number, today: string, inWindow: b
       .bind(since)
       .all<{ name: string }>();
     const picks = results.map((r) => r.name).join(", ");
+    // Lo que salió con historia (de noche, o sobre el tope diario) no tuvo aviso propio: va aquí.
+    const { historyAlert } = await getSettings(env);
+    const { results: hist } = historyAlert.enabled
+      ? await env.DB.prepare(
+          `SELECT name, wb_years AS years FROM domains
+           WHERE baseline = 0 AND first_seen_at > ?1 AND wb_years >= ?2 AND status != 'dismissed'
+           ORDER BY wb_years DESC, len ASC LIMIT 3`,
+        )
+          .bind(since, historyAlert.minYears)
+          .all<{ name: string; years: number }>()
+      : { results: [] as { name: string; years: number }[] };
     const delivered = await notifyAll(env, {
       title: `☀️ ${total} dominios liberados desde ayer`,
-      body: picks ? `Los más cortos: ${picks}` : "Abre la app para ver el listado.",
+      body: [hist.length ? digestHistoryLine(hist) : "", picks ? `Los más cortos: ${picks}` : ""].filter(Boolean).join("\n") || "Abre la app para ver el listado.",
       url: "/?v=new",
       tag: "digest",
     });

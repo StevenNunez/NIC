@@ -4,6 +4,8 @@ import { notifyAll } from "./notify.ts";
 import { runPoll } from "./poll.ts";
 import { checkReminders, refreshDueWhois, refreshWhois } from "./watch.ts";
 import { listEvents, recordEvent } from "./events.ts";
+import { enrichWayback, lookupDomain } from "./history.ts";
+import { getSettings, normalizeSettings, saveSettings } from "./settings.ts";
 import { DAY_END_HOUR, DAY_START_HOUR, NIGHT_EVERY_MIN, isDaytime, santiagoTime, shouldPoll } from "./schedule.ts";
 
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
@@ -46,7 +48,7 @@ export default {
 
   async scheduled(controller, env, ctx): Promise<void> {
     if (!shouldPoll(santiagoTime(new Date(controller.scheduledTime)))) return;
-    ctx.waitUntil(Promise.all([runPoll(env), refreshDueWhois(env), checkReminders(env)]));
+    ctx.waitUntil(Promise.all([runPoll(env), refreshDueWhois(env), checkReminders(env), enrichWayback(env)]));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -72,6 +74,15 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (path === "/api/stats" && method === "GET") return stats(env);
   if (path === "/api/domains" && method === "GET") return listDomains(env, url);
   if (path.startsWith("/api/domains/") && method === "PATCH") return patchDomain(request, env, decodeURIComponent(path.slice(13)));
+  if (path === "/api/settings") {
+    if (method === "GET") return json(await getSettings(env));
+    if (method === "PUT") return putSettings(request, env);
+  }
+  if (path === "/api/lookup" && method === "POST") return lookup(request, env);
+  if (path === "/api/lookups") {
+    if (method === "GET") return getLookups(env);
+    if (method === "DELETE") return removeLookup(request, env);
+  }
   if (path === "/api/watchlist") {
     if (method === "GET") return getWatchlist(env);
     if (method === "POST") return addWatch(request, env);
@@ -111,6 +122,9 @@ interface DomainRow {
   len: number;
   baseline: number;
   watched: number;
+  wbYears: number | null;
+  wbFirst: number | null;
+  wbLast: number | null;
 }
 
 async function listDomains(env: Env, url: URL): Promise<Response> {
@@ -138,11 +152,22 @@ async function listDomains(env: Env, url: URL): Promise<Response> {
   if (p.get("noDigit") === "1") where.push("d.has_digit = 0");
   // "Solo liberados desde que el radar está prendido": excluye la carga inicial.
   if (p.get("fresh") === "1") where.push("d.baseline = 0");
+  // Solo los que tuvieron sitio en archive.org.
+  if (p.get("history") === "1") where.push("d.wb_years > 0");
+  const minYears = Number(p.get("minYears"));
+  if (Number.isInteger(minYears) && minYears > 0) (where.push("d.wb_years >= ?"), args.push(minYears));
   const sinceHours = Number(p.get("sinceHours"));
   if (sinceHours > 0) (where.push("d.first_seen_at >= ?"), args.push(Date.now() - sinceHours * 3600_000));
 
+  const sort = p.get("sort");
   const order =
-    p.get("sort") === "short" ? "d.len ASC, d.name ASC" : p.get("sort") === "alpha" ? "d.name ASC" : "d.first_seen_at DESC, d.name ASC";
+    sort === "short"
+      ? "d.len ASC, d.name ASC"
+      : sort === "alpha"
+        ? "d.name ASC"
+        : sort === "history"
+          ? "d.wb_years DESC, d.wb_last DESC, d.len ASC, d.name ASC"
+          : "d.first_seen_at DESC, d.name ASC";
   const limit = 100;
   const offset = Math.max(0, Math.floor(Number(p.get("offset")) || 0));
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
@@ -150,6 +175,7 @@ async function listDomains(env: Env, url: URL): Promise<Response> {
   const [rows, total] = await Promise.all([
     env.DB.prepare(
       `SELECT d.name, d.first_seen_at AS firstSeenAt, d.status, d.note, d.len, d.baseline,
+              d.wb_years AS wbYears, d.wb_first AS wbFirst, d.wb_last AS wbLast,
               EXISTS (SELECT 1 FROM watchlist w WHERE w.name = d.name) AS watched
        FROM domains d ${clause} ORDER BY ${order} LIMIT ${limit} OFFSET ${offset}`,
     )
@@ -177,6 +203,57 @@ async function patchDomain(request: Request, env: Env, name: string): Promise<Re
   if (!sets.length) return bad("Nada que cambiar");
   const r = await env.DB.prepare(`UPDATE domains SET ${sets.join(", ")} WHERE name = ?`).bind(...args, name).run();
   return r.meta.changes ? json({ ok: true }) : bad("Dominio no encontrado", 404);
+}
+
+// ---------- "el dominio ya no existe": consulta de historia ----------
+
+interface LookupRow {
+  name: string;
+  whoisState: string | null;
+  expiresAt: number | null;
+  createdOn: number | null;
+  note: string | null;
+  wbFirst: number | null;
+  wbLast: number | null;
+  wbYears: number | null;
+  checkedAt: number;
+}
+
+async function putSettings(request: Request, env: Env): Promise<Response> {
+  const data = await body<unknown>(request);
+  if (typeof data !== "object" || data === null) return bad("Cuerpo inválido");
+  const settings = normalizeSettings(data);
+  await saveSettings(env, settings);
+  return json(settings);
+}
+
+async function lookup(request: Request, env: Env): Promise<Response> {
+  const data = await body<{ name?: string }>(request);
+  const name = normalizeDomain(data?.name ?? "");
+  if (!name) return bad("Escribe un dominio .cl válido");
+  try {
+    return json(await lookupDomain(env, name));
+  } catch (err) {
+    return bad(err instanceof Error ? err.message : "No se pudo consultar", 502);
+  }
+}
+
+async function getLookups(env: Env): Promise<Response> {
+  const { results } = await env.DB.prepare(
+    `SELECT l.name, l.whois_state AS whoisState, l.expires_at AS expiresAt, l.created_on AS createdOn, l.note,
+            l.wb_first AS wbFirst, l.wb_last AS wbLast, l.wb_years AS wbYears, l.checked_at AS checkedAt,
+            EXISTS (SELECT 1 FROM watchlist w WHERE w.name = l.name) AS watched
+     FROM lookups l ORDER BY l.checked_at DESC LIMIT 100`,
+  ).all<LookupRow & { watched: number }>();
+  return json({ rows: results });
+}
+
+async function removeLookup(request: Request, env: Env): Promise<Response> {
+  const data = await body<{ name?: string }>(request);
+  const name = normalizeDomain(data?.name ?? "");
+  if (!name) return bad("Dominio inválido");
+  await env.DB.prepare("DELETE FROM lookups WHERE name = ?1").bind(name).run();
+  return json({ ok: true });
 }
 
 // ---------- vigilancia ----------
@@ -284,11 +361,14 @@ async function stats(env: Env): Promise<Response> {
     env.DB.prepare(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN first_seen_at >= ?1 AND baseline = 0 THEN 1 ELSE 0 END) AS last24h,
-              SUM(CASE WHEN baseline = 0 THEN 1 ELSE 0 END) AS tracked
+              SUM(CASE WHEN baseline = 0 THEN 1 ELSE 0 END) AS tracked,
+              SUM(CASE WHEN wb_years IS NOT NULL THEN 1 ELSE 0 END) AS wbChecked,
+              SUM(CASE WHEN wb_years > 0 THEN 1 ELSE 0 END) AS wbHistory,
+              SUM(CASE WHEN hist_alert = 1 AND hist_alert_at > ?2 THEN 1 ELSE 0 END) AS histAlerts24h
        FROM domains`,
     )
-      .bind(now - 24 * 3600_000)
-      .first<{ total: number; last24h: number | null; tracked: number | null }>(),
+      .bind(now - 24 * 3600_000, now - 24 * 3600_000)
+      .first<{ total: number; last24h: number | null; tracked: number | null; wbChecked: number | null; wbHistory: number | null; histAlerts24h: number | null }>(),
     env.DB.prepare("SELECT first_seen_hour AS hour, COUNT(*) AS n FROM domains WHERE baseline = 0 GROUP BY first_seen_hour").all<{ hour: number; n: number }>(),
     env.DB.prepare("SELECT value FROM meta WHERE key = 'last_poll'").first<{ value: string }>(),
     env.DB.prepare("SELECT COUNT(*) AS c FROM push_subscriptions").first<{ c: number }>(),
@@ -305,6 +385,7 @@ async function stats(env: Env): Promise<Response> {
     total: totals?.total ?? 0,
     last24h: totals?.last24h ?? 0,
     tracked: totals?.tracked ?? 0,
+    archive: { checked: totals?.wbChecked ?? 0, withHistory: totals?.wbHistory ?? 0, alerts24h: totals?.histAlerts24h ?? 0 },
     byHour,
     lastPoll: last ? JSON.parse(last.value) : null,
     devices: subs?.c ?? 0,

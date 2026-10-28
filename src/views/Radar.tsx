@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type PollInfo, type Stats } from "../api";
+import { api, type PollInfo, type Settings, type Stats } from "../api";
 import Credit from "../components/Credit";
 import { timeAgo } from "../format";
 import { disablePush, enablePush, getPushState, isStandalone, type PushState } from "../push";
@@ -10,11 +10,27 @@ export default function Radar({ stats, reload, onLogout }: { stats: Stats | null
   const [push, setPush] = useState<PushState | null>(null);
   const [pushMsg, setPushMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
+  const [settings, setSettings] = useState<Settings | null>(null);
 
   useEffect(() => {
     void getPushState().then(setPush);
     void reload();
+    api<Settings>("/api/settings")
+      .then(setSettings)
+      .catch(() => {});
   }, [reload]);
+
+  async function saveSettings(patch: Partial<Settings["historyAlert"]>) {
+    if (!settings) return;
+    const next: Settings = { historyAlert: { ...settings.historyAlert, ...patch } };
+    setSettings(next); // se ve el cambio de inmediato; si el servidor falla, se vuelve a lo guardado
+    try {
+      setSettings(await api<Settings>("/api/settings", { method: "PUT", json: next }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+      setSettings(await api<Settings>("/api/settings").catch(() => settings));
+    }
+  }
 
   async function pollNow() {
     setPolling(true);
@@ -184,6 +200,68 @@ export default function Radar({ stats, reload, onLogout }: { stats: Stats | null
       </div>
 
       <div className="card">
+        <h2>avisos por historia</h2>
+        <p className="muted">
+          cuando NIC libera un dominio con muchos años de sitio, te aviso aunque no lo vigiles. solo de día y solo si lo vi liberarse hace menos de 3 horas; lo que sale de noche va en el resumen de las 8:00.
+        </p>
+        {settings ? (
+          <>
+            <div className="setting">
+              <span id="ha-on">avisos activados</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={settings.historyAlert.enabled}
+                aria-labelledby="ha-on"
+                className="switch"
+                onClick={() => void saveSettings({ enabled: !settings.historyAlert.enabled })}
+              />
+            </div>
+            <label className="setting">
+              <span>años mínimos de historia</span>
+              <select value={settings.historyAlert.minYears} onChange={(e) => void saveSettings({ minYears: Number(e.target.value) })} disabled={!settings.historyAlert.enabled}>
+                {withCurrent([3, 5, 8, 10, 15, 20], settings.historyAlert.minYears).map((n) => (
+                  <option key={n} value={n}>
+                    {n} años
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="setting">
+              <span>máximo de avisos cada 24 h</span>
+              <select value={settings.historyAlert.maxPer24h} onChange={(e) => void saveSettings({ maxPer24h: Number(e.target.value) })} disabled={!settings.historyAlert.enabled}>
+                {withCurrent([1, 3, 5, 10, 20], settings.historyAlert.maxPer24h).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {stats && <p className="muted">en las últimas 24 h: <b>{stats.archive.alerts24h}</b> avisos de este tipo.</p>}
+          </>
+        ) : (
+          <p className="muted">cargando…</p>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>historia en archive.org</h2>
+        {stats && stats.total > 0 ? (
+          <>
+            <div className="meter" role="img" aria-label={`${stats.archive.checked} de ${stats.total} dominios revisados`}>
+              <i style={{ width: `${Math.min(100, (stats.archive.checked / stats.total) * 100)}%` }} />
+            </div>
+            <p className="muted">
+              revisados <b>{stats.archive.checked.toLocaleString("es-CL")}</b> de {stats.total.toLocaleString("es-CL")} · <b>{stats.archive.withHistory.toLocaleString("es-CL")}</b> tuvieron sitio.
+              {stats.archive.checked < stats.total ? " sigo revisando en segundo plano, de a poco." : ""}
+            </p>
+          </>
+        ) : (
+          <p className="muted">sin datos todavía.</p>
+        )}
+      </div>
+
+      <div className="card">
         <h2>horas de liberación</h2>
         {stats && stats.tracked < 30 ? (
           <p className="muted">aún juntando datos ({stats.tracked} liberaciones vistas). con unos días de uso se ve en qué horas conviene estar atento.</p>
@@ -212,4 +290,9 @@ export default function Radar({ stats, reload, onLogout }: { stats: Stats | null
       <Credit />
     </section>
   );
+}
+
+/** Las opciones del selector, con el valor guardado incluido aunque no esté entre las habituales. */
+function withCurrent(options: number[], current: number): number[] {
+  return options.includes(current) ? options : [...options, current].sort((a, b) => a - b);
 }

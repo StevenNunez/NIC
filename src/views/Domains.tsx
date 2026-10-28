@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { registerUrl } from "../../shared/domain";
+import { registerUrl, snapshotUrl } from "../../shared/domain";
 import { api, type DomainRow } from "../api";
-import { ageShort } from "../format";
+import { ageShort, yearRange } from "../format";
 
 type StatusTab = "active" | "favorite" | "dismissed";
-type Sort = "recent" | "short" | "alpha";
+type Sort = "recent" | "short" | "alpha" | "history";
 
 interface Filters {
   noDigit: boolean;
@@ -12,22 +12,24 @@ interface Filters {
   short: boolean; // hasta 8 letras
   fresh: boolean; // solo los que el radar vio liberarse (sin la carga inicial)
   last24: boolean;
+  history: boolean; // solo los que tuvieron sitio en archive.org
 }
 
 const CHIPS: { key: keyof Filters; label: string }[] = [
   { key: "noDigit", label: "sin números" },
   { key: "noHyphen", label: "sin guiones" },
   { key: "short", label: "≤ 8 letras" },
+  { key: "history", label: "con historia" },
   { key: "last24", label: "últimas 24 h" },
   { key: "fresh", label: "vistos por el radar" },
 ];
 
-export default function Domains({ initialFresh }: { initialFresh: boolean }) {
+export default function Domains({ initialFresh, preset }: { initialFresh: boolean; preset?: "history" }) {
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
   const [status, setStatus] = useState<StatusTab>("active");
-  const [sort, setSort] = useState<Sort>("recent");
-  const [filters, setFilters] = useState<Filters>({ noDigit: false, noHyphen: false, short: false, fresh: initialFresh, last24: false });
+  const [sort, setSort] = useState<Sort>(preset === "history" ? "history" : "recent");
+  const [filters, setFilters] = useState<Filters>({ noDigit: false, noHyphen: false, short: false, fresh: initialFresh, last24: false, history: preset === "history" });
   const [rows, setRows] = useState<DomainRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -48,6 +50,7 @@ export default function Domains({ initialFresh }: { initialFresh: boolean }) {
       if (filters.short) p.set("maxLen", "8");
       if (filters.fresh) p.set("fresh", "1");
       if (filters.last24) p.set("sinceHours", "24");
+      if (filters.history) p.set("history", "1");
       return `/api/domains?${p}`;
     },
     [status, sort, debounced, filters],
@@ -140,6 +143,7 @@ export default function Domains({ initialFresh }: { initialFresh: boolean }) {
         <select aria-label="Ordenar" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
           <option value="recent">más recientes</option>
           <option value="short">más cortos</option>
+          <option value="history">más historia</option>
           <option value="alpha">a–z</option>
         </select>
       </div>
@@ -166,6 +170,11 @@ export default function Domains({ initialFresh }: { initialFresh: boolean }) {
               <span className="meta">
                 {ageShort(r.firstSeenAt)}
                 {r.watched ? " · vigilado" : ""}
+                {r.wbYears && r.wbFirst && r.wbLast ? (
+                  <a className="hist" href={snapshotUrl(r.name, r.wbLast)} target="_blank" rel="noopener noreferrer" title="Ver la última captura en archive.org">
+                    ◷ {yearRange(r.wbFirst, r.wbLast)} · {r.wbYears} {r.wbYears === 1 ? "año" : "años"} ↗
+                  </a>
+                ) : null}
               </span>
               <span className="row-actions">
                 <button
