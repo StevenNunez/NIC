@@ -30,6 +30,12 @@ export interface WatchRow {
   whoisNote: string | null;
 }
 
+export interface EventRow {
+  at: number;
+  kind: string;
+  detail: Record<string, unknown> | null;
+}
+
 export interface PollInfo {
   ok: boolean;
   at: number;
@@ -47,6 +53,7 @@ export interface Stats {
   byHour: number[];
   lastPoll: PollInfo | null;
   devices: number;
+  releaseLag: { n: number; minDays: number | null; maxDays: number | null; avgDays: number | null } | null;
   watching: number;
   schedule: { daytime: boolean; dayStart: number; dayEnd: number; nightEveryMin: number };
 }

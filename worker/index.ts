@@ -2,7 +2,8 @@ import { normalizeDomain } from "../shared/domain.ts";
 import { allowLoginAttempt, checkPassword, clearSessionCookie, isAuthenticated, makeSessionCookie } from "./auth.ts";
 import { notifyAll } from "./notify.ts";
 import { runPoll } from "./poll.ts";
-import { refreshDueWhois, refreshWhois } from "./watch.ts";
+import { checkReminders, refreshDueWhois, refreshWhois } from "./watch.ts";
+import { listEvents, recordEvent } from "./events.ts";
 import { DAY_END_HOUR, DAY_START_HOUR, NIGHT_EVERY_MIN, isDaytime, santiagoTime, shouldPoll } from "./schedule.ts";
 
 const json = (data: unknown, status = 200, headers: HeadersInit = {}): Response =>
@@ -45,7 +46,7 @@ export default {
 
   async scheduled(controller, env, ctx): Promise<void> {
     if (!shouldPoll(santiagoTime(new Date(controller.scheduledTime)))) return;
-    ctx.waitUntil(Promise.all([runPoll(env), refreshDueWhois(env)]));
+    ctx.waitUntil(Promise.all([runPoll(env), refreshDueWhois(env), checkReminders(env)]));
   },
 } satisfies ExportedHandler<Env>;
 
@@ -78,6 +79,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (method === "PATCH") return rearmWatch(request, env);
   }
   if (path === "/api/watchlist/refresh" && method === "POST") return refreshWatch(request, env);
+  if (path === "/api/watchlist/events" && method === "GET") return watchEvents(env, url);
   if (path === "/api/push/key" && method === "GET") return json({ publicKey: env.VAPID_PUBLIC_KEY });
   if (path === "/api/push/subscribe") {
     if (method === "POST") return subscribe(request, env);
@@ -195,7 +197,8 @@ async function addWatch(request: Request, env: Env): Promise<Response> {
   if (!name) return bad("Escribe un dominio .cl válido");
   const count = (await env.DB.prepare("SELECT COUNT(*) AS c FROM watchlist").first<{ c: number }>())?.c ?? 0;
   if (count >= 500) return bad("La lista de vigilancia está llena (500)");
-  await env.DB.prepare("INSERT OR IGNORE INTO watchlist (name, created_at) VALUES (?1, ?2)").bind(name, Date.now()).run();
+  const added = await env.DB.prepare("INSERT OR IGNORE INTO watchlist (name, created_at) VALUES (?1, ?2)").bind(name, Date.now()).run();
+  if (added.meta.changes) await recordEvent(env, name, { kind: "added" });
   // Si NIC ya lo tiene en su lista, la próxima revisión (máx. 1 min de día) lo avisa sola:
   // el aviso compara contra la lista actual de NIC, no contra el historial guardado.
   // Se consulta a NIC al tiro para mostrar la fecha de vencimiento; si NIC no responde,
@@ -208,7 +211,11 @@ async function removeWatch(request: Request, env: Env): Promise<Response> {
   const data = await body<{ name?: string }>(request);
   const name = normalizeDomain(data?.name ?? "");
   if (!name) return bad("Dominio inválido");
-  await env.DB.prepare("DELETE FROM watchlist WHERE name = ?1").bind(name).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM watchlist WHERE name = ?1").bind(name),
+    env.DB.prepare("DELETE FROM watch_events WHERE name = ?1").bind(name),
+    env.DB.prepare("DELETE FROM watch_reminders WHERE name = ?1").bind(name),
+  ]);
   return json({ ok: true });
 }
 
@@ -225,11 +232,18 @@ async function refreshWatch(request: Request, env: Env): Promise<Response> {
   }
 }
 
+async function watchEvents(env: Env, url: URL): Promise<Response> {
+  const name = normalizeDomain(url.searchParams.get("name") ?? "");
+  if (!name) return bad("Dominio inválido");
+  return json({ rows: await listEvents(env, name) });
+}
+
 async function rearmWatch(request: Request, env: Env): Promise<Response> {
   const data = await body<{ name?: string }>(request);
   const name = normalizeDomain(data?.name ?? "");
   if (!name) return bad("Dominio inválido");
-  await env.DB.prepare("UPDATE watchlist SET notified_at = NULL WHERE name = ?1").bind(name).run();
+  const r = await env.DB.prepare("UPDATE watchlist SET notified_at = NULL WHERE name = ?1").bind(name).run();
+  if (r.meta.changes) await recordEvent(env, name, { kind: "rearmed" });
   return json({ ok: true });
 }
 
@@ -266,7 +280,7 @@ async function pushTest(env: Env): Promise<Response> {
 
 async function stats(env: Env): Promise<Response> {
   const now = Date.now();
-  const [totals, hours, last, subs, watch] = await Promise.all([
+  const [totals, hours, last, subs, watch, lag] = await Promise.all([
     env.DB.prepare(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN first_seen_at >= ?1 AND baseline = 0 THEN 1 ELSE 0 END) AS last24h,
@@ -279,6 +293,11 @@ async function stats(env: Env): Promise<Response> {
     env.DB.prepare("SELECT value FROM meta WHERE key = 'last_poll'").first<{ value: string }>(),
     env.DB.prepare("SELECT COUNT(*) AS c FROM push_subscriptions").first<{ c: number }>(),
     env.DB.prepare("SELECT COUNT(*) AS c FROM watchlist WHERE notified_at IS NULL").first<{ c: number }>(),
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n, MIN(json_extract(detail, '$.lagDays')) AS min, MAX(json_extract(detail, '$.lagDays')) AS max,
+              AVG(json_extract(detail, '$.lagDays')) AS avg
+       FROM watch_events WHERE kind = 'released' AND json_extract(detail, '$.lagDays') IS NOT NULL`,
+    ).first<{ n: number; min: number | null; max: number | null; avg: number | null }>(),
   ]);
 
   const byHour = Array.from({ length: 24 }, (_, h) => hours.results.find((r) => r.hour === h)?.n ?? 0);
@@ -289,6 +308,7 @@ async function stats(env: Env): Promise<Response> {
     byHour,
     lastPoll: last ? JSON.parse(last.value) : null,
     devices: subs?.c ?? 0,
+    releaseLag: lag && lag.n > 0 ? { n: lag.n, minDays: lag.min, maxDays: lag.max, avgDays: lag.avg } : null,
     watching: watch?.c ?? 0,
     schedule: {
       daytime: isDaytime(santiagoTime(new Date(now))),

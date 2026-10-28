@@ -50,3 +50,27 @@ export function countdown(expiresAt: number, now = Date.now()): string {
   if (d === 0) return expiresAt > now ? "vence hoy" : "venció hoy";
   return d === -1 ? "venció ayer" : `venció hace ${-d} días`;
 }
+
+/** "2026-10-27 20:55" en hora de Chile: formato de línea de registro. */
+export function stamp(ms: number): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(ms)
+      .map((x) => [x.type, x.value]),
+  );
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
+
+/** Reloj de Chile con segundos. */
+export function clockSeconds(ms: number): string {
+  return new Intl.DateTimeFormat("es-CL", { timeZone: "America/Santiago", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(ms);
+}
+
+/** "T+4 min" / "T+3 h" / "T+2 d": edad corta para el listado. */
+export function ageShort(ms: number, now = Date.now()): string {
+  const m = Math.max(0, Math.round((now - ms) / 60_000));
+  if (m < 1) return "T+0";
+  if (m < 60) return `T+${m}m`;
+  const h = Math.round(m / 60);
+  return h < 24 ? `T+${h}h` : `T+${Math.round(h / 24)}d`;
+}

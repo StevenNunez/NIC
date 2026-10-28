@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { api, UNAUTHORIZED_EVENT } from "./api";
+import { useCallback, useEffect, useState } from "react";
+import { api, UNAUTHORIZED_EVENT, type Stats } from "./api";
+import Header from "./components/Header";
+import Ticker from "./components/Ticker";
 import Domains from "./views/Domains";
 import Login from "./views/Login";
 import Radar from "./views/Radar";
@@ -14,14 +16,23 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: "radar", label: "Radar", icon: "◉" },
 ];
 
-// Los avisos abren la app con ?d=<dominio> (alerta) o ?v=new (resumen de la mañana).
+// Los avisos abren la app con ?w=<dominio> (vigilancia) o ?v=new (resumen de la mañana).
 const params = new URLSearchParams(location.search);
-const startQuery = params.get("d") ?? "";
+const focusWatch = params.get("w") ?? params.get("d") ?? "";
 const startFresh = params.get("v") === "new";
 
 export default function App() {
   const [auth, setAuth] = useState<Auth>("checking");
-  const [tab, setTab] = useState<Tab>("list");
+  const [tab, setTab] = useState<Tab>(focusWatch ? "watch" : "list");
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  const loadStats = useCallback(async () => {
+    try {
+      setStats(await api<Stats>("/api/stats"));
+    } catch {
+      /* si falla, la cabecera queda con el último dato */
+    }
+  }, []);
 
   useEffect(() => {
     api("/api/session")
@@ -32,23 +43,28 @@ export default function App() {
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, out);
   }, []);
 
+  useEffect(() => {
+    if (auth !== "in") return;
+    void loadStats();
+    const t = setInterval(() => void loadStats(), 30_000);
+    return () => clearInterval(t);
+  }, [auth, loadStats]);
+
   if (auth === "checking") return <div className="splash" role="status" aria-label="Cargando" />;
   if (auth === "out") return <Login onLogin={() => setAuth("in")} />;
 
   return (
     <div className="app">
-      <header className="top">
-        <img src="/icon-192.png" alt="" width={28} height={28} />
-        <h1>Radar NIC</h1>
-      </header>
+      <Header stats={stats} />
+      <Ticker />
 
       <main className="content">
         {/* Se mantiene montado el listado para no perder filtros ni scroll al cambiar de pestaña. */}
         <div hidden={tab !== "list"}>
-          <Domains initialQuery={startQuery} initialFresh={startFresh} />
+          <Domains initialFresh={startFresh} />
         </div>
-        {tab === "watch" && <Watchlist />}
-        {tab === "radar" && <Radar onLogout={() => setAuth("out")} />}
+        {tab === "watch" && <Watchlist focus={focusWatch} />}
+        {tab === "radar" && <Radar stats={stats} reload={loadStats} onLogout={() => setAuth("out")} />}
       </main>
 
       <nav className="tabbar" aria-label="Secciones">

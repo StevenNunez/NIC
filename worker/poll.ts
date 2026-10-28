@@ -1,6 +1,7 @@
 import { fetchWeeklyList } from "./nic.ts";
 import { notifyAll } from "./notify.ts";
 import { inDigestWindow, santiagoTime } from "./schedule.ts";
+import { recordEvent } from "./events.ts";
 import { alertDomain } from "./watch.ts";
 
 export interface PollResult {
@@ -59,7 +60,10 @@ async function alertWatchlist(env: Env, listJson: string, now: number): Promise<
     .all<{ name: string }>();
 
   let alerts = 0;
-  for (const { name } of results) if (await alertDomain(env, name, now)) alerts++;
+  for (const { name } of results) {
+    await recordEvent(env, name, { kind: "in_list", once: true }, now);
+    if (await alertDomain(env, name, now, "list")) alerts++;
+  }
   return alerts;
 }
 

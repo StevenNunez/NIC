@@ -16,13 +16,13 @@ function sample(x, y) {
   const r = Math.hypot(x, y);
   // Fondo: azul noche con un brillo suave al centro.
   const glow = Math.max(0, 1 - r / 1.2);
-  let c = [mix(8, 18, glow), mix(13, 30, glow), mix(28, 52, glow)];
+  let c = [mix(3, 8, glow), mix(7, 20, glow), mix(5, 12, glow)];
 
   const over = (rgb, a) => {
     c = [mix(c[0], rgb[0], a), mix(c[1], rgb[1], a), mix(c[2], rgb[2], a)];
   };
 
-  const green = [52, 211, 153];
+  const green = [57, 255, 136];
   // Barrido del radar: cuña que se desvanece contra el sentido del giro.
   const ang = Math.atan2(y, x); // 0 = derecha, -PI/2 = arriba
   const lead = -Math.PI / 4; // borde delantero (arriba a la derecha)
@@ -34,9 +34,9 @@ function sample(x, y) {
     if (Math.abs(r - ring) < 0.014) over(green, a);
   }
   // Línea delantera del barrido.
-  if (r < 0.69 && Math.abs(Math.sin(ang - lead)) * r < 0.012 && Math.cos(ang - lead) > 0) over([167, 243, 208], 0.95);
+  if (r < 0.69 && Math.abs(Math.sin(ang - lead)) * r < 0.012 && Math.cos(ang - lead) > 0) over([190, 255, 215], 0.95);
   // Centro y punto detectado (el dominio que aparece).
-  if (r < 0.045) over([209, 250, 229], 1);
+  if (r < 0.045) over([220, 255, 235], 1);
   if (Math.hypot(x - 0.3, y + 0.31) < 0.055) over([251, 191, 36], 1);
   if (Math.hypot(x - 0.3, y + 0.31) < 0.11) over([251, 191, 36], 0.18);
 

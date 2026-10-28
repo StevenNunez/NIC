@@ -44,3 +44,10 @@ export function shouldPoll(t: SantiagoTime): boolean {
 export function inDigestWindow(t: SantiagoTime): boolean {
   return t.hour >= DAY_START_HOUR && t.hour < 12;
 }
+
+const dateFmt = new Intl.DateTimeFormat("es-CL", { timeZone: TZ, day: "numeric", month: "long", year: "numeric" });
+
+/** "26 de diciembre de 2026", en hora de Chile. */
+export function chileDate(ms: number): string {
+  return dateFmt.format(ms);
+}

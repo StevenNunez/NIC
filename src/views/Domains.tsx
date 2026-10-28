@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { registerUrl } from "../../shared/domain";
 import { api, type DomainRow } from "../api";
-import { timeAgo } from "../format";
+import { ageShort } from "../format";
 
 type StatusTab = "active" | "favorite" | "dismissed";
 type Sort = "recent" | "short" | "alpha";
@@ -15,16 +15,16 @@ interface Filters {
 }
 
 const CHIPS: { key: keyof Filters; label: string }[] = [
-  { key: "noDigit", label: "Sin números" },
-  { key: "noHyphen", label: "Sin guiones" },
-  { key: "short", label: "Hasta 8 letras" },
-  { key: "last24", label: "Últimas 24 h" },
-  { key: "fresh", label: "Solo vistos por el radar" },
+  { key: "noDigit", label: "sin números" },
+  { key: "noHyphen", label: "sin guiones" },
+  { key: "short", label: "≤ 8 letras" },
+  { key: "last24", label: "últimas 24 h" },
+  { key: "fresh", label: "vistos por el radar" },
 ];
 
-export default function Domains({ initialQuery, initialFresh }: { initialQuery: string; initialFresh: boolean }) {
-  const [q, setQ] = useState(initialQuery);
-  const [debounced, setDebounced] = useState(initialQuery);
+export default function Domains({ initialFresh }: { initialFresh: boolean }) {
+  const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
   const [status, setStatus] = useState<StatusTab>("active");
   const [sort, setSort] = useState<Sort>("recent");
   const [filters, setFilters] = useState<Filters>({ noDigit: false, noHyphen: false, short: false, fresh: initialFresh, last24: false });
@@ -92,19 +92,20 @@ export default function Domains({ initialQuery, initialFresh }: { initialQuery: 
 
   return (
     <section>
-      <div className="searchbar">
+      <label className="prompt">
+        <span aria-hidden="true">&gt;</span>
         <input
           type="search"
           inputMode="search"
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          placeholder="Buscar dominio…"
+          placeholder="buscar dominio…"
           aria-label="Buscar dominio"
           value={q}
           onChange={(e) => setQ(e.target.value)}
         />
-      </div>
+      </label>
 
       <div className="chips" role="group" aria-label="Filtros">
         {CHIPS.map((c) => (
@@ -114,30 +115,32 @@ export default function Domains({ initialQuery, initialFresh }: { initialQuery: 
         ))}
       </div>
 
-      <div className="toolbar">
-        <div className="seg" role="tablist" aria-label="Estado">
-          {(
-            [
-              ["active", "Todos"],
-              ["favorite", "★ Favoritos"],
-              ["dismissed", "Descartados"],
-            ] as const
-          ).map(([key, label]) => (
-            <button key={key} role="tab" aria-selected={status === key} className={status === key ? "on" : ""} onClick={() => setStatus(key)}>
-              {label}
-            </button>
-          ))}
-        </div>
+      <div className="seg" role="tablist" aria-label="Estado">
+        {(
+          [
+            ["active", "todos"],
+            ["favorite", "★ favoritos"],
+            ["dismissed", "descartados"],
+          ] as const
+        ).map(([key, label]) => (
+          <button key={key} role="tab" aria-selected={status === key} className={status === key ? "on" : ""} onClick={() => setStatus(key)}>
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="countbar">
         <p className="count" aria-live="polite">
-          {loading && !rows.length ? "Cargando…" : `${total.toLocaleString("es-CL")} dominios`}
+          {loading && !rows.length ? "cargando…" : (
+            <>
+              <b>{total.toLocaleString("es-CL")}</b> dominios
+            </>
+          )}
         </p>
         <select aria-label="Ordenar" value={sort} onChange={(e) => setSort(e.target.value as Sort)}>
-          <option value="recent">Más recientes</option>
-          <option value="short">Más cortos</option>
-          <option value="alpha">A–Z</option>
+          <option value="recent">más recientes</option>
+          <option value="short">más cortos</option>
+          <option value="alpha">a–z</option>
         </select>
       </div>
 
@@ -151,12 +154,17 @@ export default function Domains({ initialQuery, initialFresh }: { initialQuery: 
         {rows.map((r) => (
           <li key={r.name} className={`row ${r.status === "favorite" ? "fav" : ""}`}>
             <div className="dname">
-              {r.name.slice(0, -3)}
-              <span className="tld">.cl</span>
+              <span>
+                {r.name.slice(0, -3)}
+                <span className="tld">.cl</span>
+              </span>
+              <span className="badge" title="Largo del nombre">
+                {String(r.len).padStart(2, "0")}
+              </span>
             </div>
             <div className="row-foot">
               <span className="meta">
-                {r.len} letras · {timeAgo(r.firstSeenAt)}
+                {ageShort(r.firstSeenAt)}
                 {r.watched ? " · vigilado" : ""}
               </span>
               <span className="row-actions">
@@ -176,7 +184,7 @@ export default function Domains({ initialQuery, initialFresh }: { initialQuery: 
                   {r.status === "dismissed" ? "↩" : "✕"}
                 </button>
                 <a className="btn primary small" href={registerUrl(r.name)} target="_blank" rel="noopener noreferrer">
-                  Inscribir
+                  inscribir ▸
                 </a>
               </span>
             </div>
@@ -184,11 +192,11 @@ export default function Domains({ initialQuery, initialFresh }: { initialQuery: 
         ))}
       </ul>
 
-      {!loading && !rows.length && !error && <p className="empty">No hay dominios con esos filtros.</p>}
+      {!loading && !rows.length && !error && <p className="empty">sin dominios con esos filtros</p>}
 
       {rows.length < total && (
         <button className="btn block" disabled={loading} onClick={() => void load(true, rows.length)}>
-          {loading ? "Cargando…" : "Cargar más"}
+          {loading ? "cargando…" : "cargar más"}
         </button>
       )}
     </section>
