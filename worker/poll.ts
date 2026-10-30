@@ -28,20 +28,29 @@ export async function runPoll(env: Env): Promise<PollResult> {
     const json = JSON.stringify(domains);
     const time = santiagoTime(now);
 
-    // La primera carga trae ~2.000 dominios que ya estaban: no son "liberaciones nuevas".
-    const known = (await env.DB.prepare("SELECT COUNT(*) AS c FROM domains").first<{ c: number }>())?.c ?? 0;
+    // NIC publica la lista una vez por semana: si es idéntica a la de la pasada anterior no hay nada
+    // que insertar, y se evita releer toda la tabla de dominios cada minuto (límite diario de filas leídas de D1).
+    const hash = await sha256(json);
+    const prevHash = (await env.DB.prepare("SELECT value FROM meta WHERE key = 'list_hash'").first<{ value: string }>())?.value;
+    let added = 0;
+    let firstRun = false;
+    if (hash !== prevHash) {
+      // La primera carga trae ~2.000 dominios que ya estaban: no son "liberaciones nuevas".
+      firstRun = !(await env.DB.prepare("SELECT 1 AS x FROM domains LIMIT 1").first());
 
-    // json_each evita armar SQL con los nombres y mantiene el insert en una sola consulta.
-    const ins = await env.DB.prepare(
-      `INSERT OR IGNORE INTO domains (name, first_seen_at, first_seen_hour, baseline)
-       SELECT value, ?2, ?3, ?4 FROM json_each(?1) WHERE value NOT IN (SELECT name FROM domains)`,
-    )
-      .bind(json, t0, time.hour, known === 0 ? 1 : 0)
-      .run();
-    const added = ins.meta.changes ?? 0;
+      // json_each evita armar SQL con los nombres y mantiene el insert en una sola consulta.
+      const ins = await env.DB.prepare(
+        `INSERT OR IGNORE INTO domains (name, first_seen_at, first_seen_hour, baseline)
+         SELECT value, ?2, ?3, ?4 FROM json_each(?1) WHERE value NOT IN (SELECT name FROM domains)`,
+      )
+        .bind(json, t0, time.hour, firstRun ? 1 : 0)
+        .run();
+      added = ins.meta.changes ?? 0;
+      await env.DB.prepare("INSERT INTO meta (key, value) VALUES ('list_hash', ?1) ON CONFLICT(key) DO UPDATE SET value = ?1").bind(hash).run();
+    }
 
-    const alerts = await alertWatchlist(env, json, t0);
-    await maybeSendDigest(env, t0, time.date, inDigestWindow(time), known === 0);
+    const alerts = await alertWatchlist(env, new Set(domains), t0);
+    await maybeSendDigest(env, t0, time.date, inDigestWindow(time), firstRun);
 
     const result: PollResult = { ok: true, at: t0, total: domains.length, added, alerts, ms: Date.now() - t0 };
     await finish(env, result, added > 0 || alerts > 0);
@@ -54,15 +63,13 @@ export async function runPoll(env: Env): Promise<PollResult> {
   }
 }
 
-async function alertWatchlist(env: Env, listJson: string, now: number): Promise<number> {
-  const { results } = await env.DB.prepare(
-    "SELECT name FROM watchlist WHERE notified_at IS NULL AND name IN (SELECT value FROM json_each(?1))",
-  )
-    .bind(listJson)
-    .all<{ name: string }>();
+async function alertWatchlist(env: Env, listed: Set<string>, now: number): Promise<number> {
+  // La vigilancia es corta (máx. 500): se cruza aquí en vez de recorrer la lista de NIC dentro de D1.
+  const { results } = await env.DB.prepare("SELECT name FROM watchlist WHERE notified_at IS NULL").all<{ name: string }>();
 
   let alerts = 0;
   for (const { name } of results) {
+    if (!listed.has(name)) continue;
     await recordEvent(env, name, { kind: "in_list", once: true }, now);
     if (await alertDomain(env, name, now, "list")) alerts++;
   }
@@ -130,4 +137,9 @@ async function finish(env: Env, r: PollResult, log: boolean): Promise<void> {
     );
   }
   await env.DB.batch(stmts);
+}
+
+async function sha256(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
 }

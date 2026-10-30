@@ -9,11 +9,11 @@ export default function Ticker() {
   useEffect(() => {
     let alive = true;
     const load = () =>
-      api<{ rows: DomainRow[] }>("/api/domains?sort=recent&fresh=1")
+      api<{ rows: DomainRow[] }>("/api/domains?sort=recent&fresh=1&noTotal=1")
         .then((d) => alive && setRows(d.rows.slice(0, 24)))
         .catch(() => alive && setRows((prev) => prev ?? []));
     void load();
-    const t = setInterval(load, 60_000);
+    const t = setInterval(() => document.visibilityState === "visible" && void load(), 120_000);
     return () => {
       alive = false;
       clearInterval(t);

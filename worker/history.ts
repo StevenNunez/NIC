@@ -29,23 +29,46 @@ interface Candidate {
  */
 export async function enrichWayback(env: Env): Promise<void> {
   const now = Date.now();
-  const [settings, { results }] = await Promise.all([
-    getSettings(env),
-    env.DB.prepare(
-      `SELECT name, baseline FROM domains
-       WHERE status != 'dismissed'
-         AND (wb_checked_at IS NULL
-              OR (wb_years IS NULL AND wb_checked_at < CASE WHEN baseline = 0 AND first_seen_at > ?2 THEN ?3 ELSE ?1 END))
-       ORDER BY (status = 'favorite') DESC, baseline ASC, first_seen_at DESC, len ASC
-       LIMIT ${FRESH_PER_RUN}`,
-    )
-      .bind(now - RETRY_AFTER, now - FRESH_MS, now - RETRY_FRESH_AFTER)
-      .all<Candidate>(),
-  ]);
+  const settings = await getSettings(env);
+  const stale = now - RETRY_AFTER;
+  const staleFresh = now - RETRY_FRESH_AFTER;
 
-  // Si lo primero es un dominio recién liberado se atienden todos los frescos; si no, solo el respaldo, más despacio.
-  const batch = results[0]?.baseline === 0 ? results.filter((r) => r.baseline === 0) : results.slice(0, BACKLOG_PER_RUN);
-  await Promise.all(batch.map((c) => processDomain(env, c.name, now, settings)));
+  // Consultas acotadas con índice (ver migración 0006): una sola ordenada sobre toda la tabla
+  // leía miles de filas cada minuto y agotaba el cupo diario de lecturas de D1.
+  const { results: fresh } = await env.DB.prepare(
+    `SELECT name, baseline FROM domains
+     WHERE wb_years IS NULL AND baseline = 0 AND status != 'dismissed'
+       AND (wb_checked_at IS NULL OR wb_checked_at < CASE WHEN first_seen_at > ?2 THEN ?3 ELSE ?1 END)
+     ORDER BY first_seen_at DESC LIMIT ${FRESH_PER_RUN}`,
+  )
+    .bind(stale, now - FRESH_MS, staleFresh)
+    .all<Candidate>();
+
+  // Si hay recién liberados se atienden todos juntos; si no, solo el respaldo, más despacio.
+  if (fresh.length) {
+    await Promise.all(fresh.map((c) => processDomain(env, c.name, now, settings)));
+    return;
+  }
+
+  // Los favoritos van primero (son pocos: los encuentra el índice de estado); el resto, de los más cortos.
+  let { results: backlog } = await env.DB.prepare(
+    `SELECT name, baseline FROM domains
+     WHERE status = 'favorite' AND wb_years IS NULL AND (wb_checked_at IS NULL OR wb_checked_at < ?1)
+     LIMIT ${BACKLOG_PER_RUN}`,
+  )
+    .bind(stale)
+    .all<Candidate>();
+  if (!backlog.length) {
+    ({ results: backlog } = await env.DB.prepare(
+      `SELECT name, baseline FROM domains
+       WHERE wb_years IS NULL AND baseline = 1 AND status != 'dismissed'
+         AND (wb_checked_at IS NULL OR wb_checked_at < ?1)
+       ORDER BY len ASC LIMIT ${BACKLOG_PER_RUN}`,
+    )
+      .bind(stale)
+      .all<Candidate>());
+  }
+  await Promise.all(backlog.map((c) => processDomain(env, c.name, now, settings)));
 }
 
 async function processDomain(env: Env, name: string, now: number, settings: Settings): Promise<void> {

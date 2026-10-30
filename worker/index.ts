@@ -172,6 +172,7 @@ async function listDomains(env: Env, url: URL): Promise<Response> {
   const offset = Math.max(0, Math.floor(Number(p.get("offset")) || 0));
   const clause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
+  const wantTotal = p.get("noTotal") !== "1";
   const [rows, total] = await Promise.all([
     env.DB.prepare(
       `SELECT d.name, d.first_seen_at AS firstSeenAt, d.status, d.note, d.len, d.baseline,
@@ -181,9 +182,10 @@ async function listDomains(env: Env, url: URL): Promise<Response> {
     )
       .bind(...args)
       .all<DomainRow>(),
-    env.DB.prepare(`SELECT COUNT(*) AS c FROM domains d ${clause}`).bind(...args).first<{ c: number }>(),
+    // El total recorre todas las filas que calzan: solo se pide cuando la pantalla lo muestra.
+    wantTotal ? env.DB.prepare(`SELECT COUNT(*) AS c FROM domains d ${clause}`).bind(...args).first<{ c: number }>() : Promise.resolve(null),
   ]);
-  return json({ rows: rows.results, total: total?.c ?? 0, limit });
+  return json({ rows: rows.results, total: total?.c ?? null, limit });
 }
 
 async function patchDomain(request: Request, env: Env, name: string): Promise<Response> {
@@ -355,9 +357,18 @@ async function pushTest(env: Env): Promise<Response> {
 
 // ---------- estado ----------
 
-async function stats(env: Env): Promise<Response> {
-  const now = Date.now();
-  const [totals, hours, last, subs, watch, lag] = await Promise.all([
+type Heavy = {
+  totals: { total: number; last24h: number | null; tracked: number | null; wbChecked: number | null; wbHistory: number | null; histAlerts24h: number | null } | null;
+  hours: { hour: number; n: number }[];
+  lag: { n: number; min: number | null; max: number | null; avg: number | null } | null;
+};
+/** Las cifras que recorren toda la tabla cambian despacio: se recalculan cada 5 min, no en cada visita (cupo de lecturas de D1). */
+const HEAVY_TTL = 5 * 60_000;
+let heavyCache: { at: number; data: Heavy } | null = null;
+
+async function loadHeavy(env: Env, now: number): Promise<Heavy> {
+  if (heavyCache && now - heavyCache.at < HEAVY_TTL) return heavyCache.data;
+  const [totals, hours, lag] = await Promise.all([
     env.DB.prepare(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN first_seen_at >= ?1 AND baseline = 0 THEN 1 ELSE 0 END) AS last24h,
@@ -370,17 +381,27 @@ async function stats(env: Env): Promise<Response> {
       .bind(now - 24 * 3600_000, now - 24 * 3600_000)
       .first<{ total: number; last24h: number | null; tracked: number | null; wbChecked: number | null; wbHistory: number | null; histAlerts24h: number | null }>(),
     env.DB.prepare("SELECT first_seen_hour AS hour, COUNT(*) AS n FROM domains WHERE baseline = 0 GROUP BY first_seen_hour").all<{ hour: number; n: number }>(),
-    env.DB.prepare("SELECT value FROM meta WHERE key = 'last_poll'").first<{ value: string }>(),
-    env.DB.prepare("SELECT COUNT(*) AS c FROM push_subscriptions").first<{ c: number }>(),
-    env.DB.prepare("SELECT COUNT(*) AS c FROM watchlist WHERE notified_at IS NULL").first<{ c: number }>(),
     env.DB.prepare(
       `SELECT COUNT(*) AS n, MIN(json_extract(detail, '$.lagDays')) AS min, MAX(json_extract(detail, '$.lagDays')) AS max,
               AVG(json_extract(detail, '$.lagDays')) AS avg
        FROM watch_events WHERE kind = 'released' AND json_extract(detail, '$.lagDays') IS NOT NULL`,
     ).first<{ n: number; min: number | null; max: number | null; avg: number | null }>(),
   ]);
+  const data: Heavy = { totals, hours: hours.results, lag };
+  heavyCache = { at: now, data };
+  return data;
+}
 
-  const byHour = Array.from({ length: 24 }, (_, h) => hours.results.find((r) => r.hour === h)?.n ?? 0);
+async function stats(env: Env): Promise<Response> {
+  const now = Date.now();
+  const [{ totals, hours, lag }, last, subs, watch] = await Promise.all([
+    loadHeavy(env, now),
+    env.DB.prepare("SELECT value FROM meta WHERE key = 'last_poll'").first<{ value: string }>(),
+    env.DB.prepare("SELECT COUNT(*) AS c FROM push_subscriptions").first<{ c: number }>(),
+    env.DB.prepare("SELECT COUNT(*) AS c FROM watchlist WHERE notified_at IS NULL").first<{ c: number }>(),
+  ]);
+
+  const byHour = Array.from({ length: 24 }, (_, h) => hours.find((r) => r.hour === h)?.n ?? 0);
   return json({
     total: totals?.total ?? 0,
     last24h: totals?.last24h ?? 0,

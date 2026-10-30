@@ -49,7 +49,8 @@ export default function App() {
   useEffect(() => {
     if (auth !== "in") return;
     void loadStats();
-    const t = setInterval(() => void loadStats(), 30_000);
+    // Con la pestaña en segundo plano no se consulta: cada visita cuesta lecturas del cupo diario de D1.
+    const t = setInterval(() => document.visibilityState === "visible" && void loadStats(), 60_000);
     return () => clearInterval(t);
   }, [auth, loadStats]);
 
