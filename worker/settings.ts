@@ -1,5 +1,7 @@
 // Ajustes del radar (se guardan como un solo valor JSON en la tabla meta).
 
+import { normalizeRules, type PatternRule } from "./pattern-alerts.ts";
+
 export interface Settings {
   historyAlert: {
     enabled: boolean;
@@ -8,9 +10,11 @@ export interface Settings {
     /** Máximo de avisos por historia en cualquier ventana de 24 horas. */
     maxPer24h: number;
   };
+  /** Reglas de patrón: avisan de dominios recién liberados que calcen (ver pattern-alerts.ts). */
+  patterns: PatternRule[];
 }
 
-export const DEFAULT_SETTINGS: Settings = { historyAlert: { enabled: true, minYears: 10, maxPer24h: 5 } };
+export const DEFAULT_SETTINGS: Settings = { historyAlert: { enabled: true, minYears: 10, maxPer24h: 5 }, patterns: [] };
 
 const clampInt = (v: unknown, min: number, max: number, fallback: number): number =>
   typeof v === "number" && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback;
@@ -25,6 +29,7 @@ export function normalizeSettings(raw: unknown): Settings {
       minYears: clampInt(h?.minYears, 3, 30, d.minYears),
       maxPer24h: clampInt(h?.maxPer24h, 1, 30, d.maxPer24h),
     },
+    patterns: normalizeRules(typeof raw === "object" && raw !== null ? (raw as { patterns?: unknown }).patterns : null),
   };
 }
 

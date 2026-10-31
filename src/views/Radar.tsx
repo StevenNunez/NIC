@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type PollInfo, type Settings, type Stats } from "../api";
+import { api, type PatternRule, type PollInfo, type Settings, type Stats } from "../api";
 import Credit from "../components/Credit";
 import { timeAgo } from "../format";
 import { disablePush, enablePush, getPushState, isStandalone, type PushState } from "../push";
@@ -22,7 +22,11 @@ export default function Radar({ stats, reload, onLogout }: { stats: Stats | null
 
   async function saveSettings(patch: Partial<Settings["historyAlert"]>) {
     if (!settings) return;
-    const next: Settings = { historyAlert: { ...settings.historyAlert, ...patch } };
+    await putSettings({ ...settings, historyAlert: { ...settings.historyAlert, ...patch } });
+  }
+
+  async function putSettings(next: Settings) {
+    if (!settings) return;
     setSettings(next); // se ve el cambio de inmediato; si el servidor falla, se vuelve a lo guardado
     try {
       setSettings(await api<Settings>("/api/settings", { method: "PUT", json: next }));
@@ -245,6 +249,18 @@ export default function Radar({ stats, reload, onLogout }: { stats: Stats | null
       </div>
 
       <div className="card">
+        <h2>avisos por patrón</h2>
+        <p className="muted">
+          dime qué tipo de dominio te interesa y te aviso cuando NIC libere uno que calce, aunque no tenga historia. de noche no suena: va en el resumen de las 8:00. un solo aviso por revisión, aunque calcen varios.
+        </p>
+        {settings ? (
+          <PatternRules rules={settings.patterns} onChange={(patterns) => void putSettings({ ...settings, patterns })} />
+        ) : (
+          <p className="muted">cargando…</p>
+        )}
+      </div>
+
+      <div className="card">
         <h2>historia en archive.org</h2>
         {stats && stats.total > 0 ? (
           <>
@@ -289,6 +305,93 @@ export default function Radar({ stats, reload, onLogout }: { stats: Stats | null
       </button>
       <Credit />
     </section>
+  );
+}
+
+const EMPTY_RULE: Omit<PatternRule, "id"> = { label: "", enabled: true, minLen: 0, maxLen: 0, noDigit: false, noHyphen: false, startsWith: "", endsWith: "", contains: "" };
+
+function PatternRules({ rules, onChange }: { rules: PatternRule[]; onChange: (rules: PatternRule[]) => void }) {
+  const [draft, setDraft] = useState(EMPTY_RULE);
+  const set = <K extends keyof typeof EMPTY_RULE>(k: K, v: (typeof EMPTY_RULE)[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  const num = (v: string) => Math.max(0, Math.min(63, Math.floor(Number(v)) || 0));
+  const hasCondition = draft.minLen || draft.maxLen || draft.noDigit || draft.noHyphen || draft.startsWith || draft.endsWith || draft.contains;
+
+  function add() {
+    if (!hasCondition || rules.length >= 10) return;
+    onChange([...rules, { ...draft, id: `r${Date.now().toString(36)}` }]);
+    setDraft(EMPTY_RULE);
+  }
+
+  return (
+    <>
+      {rules.length === 0 && <p className="muted">sin reglas todavía. ejemplo: 4 letras, sin números ni guion.</p>}
+      {rules.map((r) => (
+        <div className="setting" key={r.id}>
+          <span id={`pr-${r.id}`}>{r.label}</span>
+          <span className="btn-row">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={r.enabled}
+              aria-labelledby={`pr-${r.id}`}
+              className="switch"
+              onClick={() => onChange(rules.map((x) => (x.id === r.id ? { ...x, enabled: !x.enabled } : x)))}
+            />
+            <button type="button" className="btn" aria-label={`quitar ${r.label}`} onClick={() => onChange(rules.filter((x) => x.id !== r.id))}>
+              quitar
+            </button>
+          </span>
+        </div>
+      ))}
+
+      {rules.length < 10 && (
+        <form
+          className="stack"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add();
+          }}
+        >
+          <div className="btn-row">
+            <label className="setting">
+              <span>largo mín.</span>
+              <input type="number" inputMode="numeric" min={0} max={63} value={draft.minLen || ""} onChange={(e) => set("minLen", num(e.target.value))} />
+            </label>
+            <label className="setting">
+              <span>largo máx.</span>
+              <input type="number" inputMode="numeric" min={0} max={63} value={draft.maxLen || ""} onChange={(e) => set("maxLen", num(e.target.value))} />
+            </label>
+          </div>
+          <label className="setting">
+            <span>empieza con</span>
+            <input value={draft.startsWith} maxLength={30} onChange={(e) => set("startsWith", e.target.value)} />
+          </label>
+          <label className="setting">
+            <span>termina en</span>
+            <input value={draft.endsWith} maxLength={30} onChange={(e) => set("endsWith", e.target.value)} />
+          </label>
+          <label className="setting">
+            <span>contiene</span>
+            <input value={draft.contains} maxLength={30} onChange={(e) => set("contains", e.target.value)} />
+          </label>
+          <label className="setting">
+            <span>sin números</span>
+            <input type="checkbox" checked={draft.noDigit} onChange={(e) => set("noDigit", e.target.checked)} />
+          </label>
+          <label className="setting">
+            <span>sin guion</span>
+            <input type="checkbox" checked={draft.noHyphen} onChange={(e) => set("noHyphen", e.target.checked)} />
+          </label>
+          <label className="setting">
+            <span>nombre (opcional)</span>
+            <input value={draft.label} maxLength={40} onChange={(e) => set("label", e.target.value)} />
+          </label>
+          <button className="btn block" type="submit" disabled={!hasCondition}>
+            agregar regla ▸
+          </button>
+        </form>
+      )}
+    </>
   );
 }
 

@@ -5,6 +5,7 @@ import { runPoll } from "./poll.ts";
 import { checkReminders, refreshDueWhois, refreshWhois } from "./watch.ts";
 import { listEvents, recordEvent } from "./events.ts";
 import { enrichWayback, lookupDomain } from "./history.ts";
+import { listTrademarks, removeTrademark, saveTrademark } from "./trademarks.ts";
 import { getSettings, normalizeSettings, saveSettings } from "./settings.ts";
 import { DAY_END_HOUR, DAY_START_HOUR, NIGHT_EVERY_MIN, isDaytime, santiagoTime, shouldPoll } from "./schedule.ts";
 
@@ -77,6 +78,14 @@ async function route(request: Request, env: Env): Promise<Response> {
   if (path === "/api/settings") {
     if (method === "GET") return json(await getSettings(env));
     if (method === "PUT") return putSettings(request, env);
+  }
+  if (path === "/api/trademarks") {
+    if (method === "GET") return json({ rows: await listTrademarks(env) });
+    if (method === "PUT") {
+      const saved = await saveTrademark(env, await body(request));
+      return saved ? json(saved) : bad("Revisión inválida");
+    }
+    if (method === "DELETE") return (await removeTrademark(env, (await body<{ name?: string }>(request))?.name ?? null)) ? json({ ok: true }) : bad("Dominio inválido");
   }
   if (path === "/api/lookup" && method === "POST") return lookup(request, env);
   if (path === "/api/lookups") {
@@ -264,7 +273,7 @@ async function getWatchlist(env: Env): Promise<Response> {
   const { results } = await env.DB.prepare(
     `SELECT w.name, w.created_at AS createdAt, w.notified_at AS notifiedAt, d.first_seen_at AS seenAt,
             w.whois_state AS whoisState, w.created_on AS createdOn, w.expires_at AS expiresAt,
-            w.whois_checked_at AS whoisCheckedAt, w.whois_note AS whoisNote
+            w.whois_checked_at AS whoisCheckedAt, w.whois_note AS whoisNote, d.wb_years AS wbYears
      FROM watchlist w LEFT JOIN domains d ON d.name = w.name ORDER BY w.created_at DESC`,
   ).all();
   return json({ rows: results });

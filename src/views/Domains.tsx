@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { registerUrl, snapshotUrl } from "../../shared/domain";
 import { api, type DomainRow } from "../api";
+import ValueInfo from "../components/ValueInfo";
 import { ageShort, yearRange } from "../format";
 
 type StatusTab = "active" | "favorite" | "dismissed";
@@ -166,6 +167,7 @@ export default function Domains({ initialFresh, preset }: { initialFresh: boolea
                 {String(r.len).padStart(2, "0")}
               </span>
             </div>
+            <ValueInfo name={r.name} wbYears={r.wbYears} />
             <div className="row-foot">
               <span className="meta">
                 {ageShort(r.firstSeenAt)}

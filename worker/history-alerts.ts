@@ -1,5 +1,6 @@
 // Decide si un dominio recién liberado con historia merece un aviso al celular. Lógica pura.
 
+import { scoreDomain } from "../shared/value.ts";
 import type { Settings } from "./settings.ts";
 
 /** Pasado este tiempo desde que el radar lo vio liberarse, ya perdió la carrera: no se avisa, va en el resumen. */
@@ -30,9 +31,10 @@ export function decideHistoryAlert(i: HistoryAlertInput): Decision {
 export function historyAlertMessage(name: string, years: number, firstAt: number, lastAt: number): { title: string; body: string } {
   const from = new Date(firstAt).getUTCFullYear();
   const to = new Date(lastAt).getUTCFullYear();
+  const v = scoreDomain(name, years);
   return {
     title: `🏛️ ${name} se liberó · ${years} años de historia`,
-    body: `Tuvo sitio ${from === to ? from : `${from}–${to}`}. NIC lo acaba de liberar: inscríbelo antes que otro.`,
+    body: `Tuvo sitio ${from === to ? from : `${from}–${to}`}. Valor ${v.score}/100${v.brand ? ` (¡ojo, parece la marca ${v.brand.brand}!)` : ""}. NIC lo acaba de liberar: inscríbelo antes que otro.`,
   };
 }
 

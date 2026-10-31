@@ -32,6 +32,8 @@ export interface WatchRow {
   expiresAt: number | null;
   whoisCheckedAt: number | null;
   whoisNote: string | null;
+  /** Años de historia en archive.org, si el dominio está en la lista de NIC y ya se revisó. */
+  wbYears?: number | null;
 }
 
 export interface LookupRow {
@@ -78,8 +80,22 @@ export interface Stats {
   schedule: { daytime: boolean; dayStart: number; dayEnd: number; nightEveryMin: number };
 }
 
+export interface PatternRule {
+  id: string;
+  label: string;
+  enabled: boolean;
+  minLen: number;
+  maxLen: number;
+  noDigit: boolean;
+  noHyphen: boolean;
+  startsWith: string;
+  endsWith: string;
+  contains: string;
+}
+
 export interface Settings {
   historyAlert: { enabled: boolean; minYears: number; maxPer24h: number };
+  patterns: PatternRule[];
 }
 
 export const UNAUTHORIZED_EVENT = "nic:unauthorized";

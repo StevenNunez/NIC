@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { registerUrl } from "../../shared/domain";
 import { api, type EventRow, type WatchRow } from "../api";
+import ValueInfo from "../components/ValueInfo";
 import { countdown, dateTime, daysUntil, stamp, timeAgo } from "../format";
 
 const WINDOW_DAYS = 30;
@@ -104,6 +105,7 @@ export default function Watchlist({ focus }: { focus: string }) {
               </span>
             </div>
 
+            <ValueInfo name={r.name} wbYears={r.wbYears} />
             <Phases row={r} />
             <Expiry row={r} />
 

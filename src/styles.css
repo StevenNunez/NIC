@@ -732,6 +732,18 @@ select {
   font-size: 0.88rem;
 }
 
+.setting input:not([type="checkbox"]) {
+  width: 9rem;
+  min-height: 38px;
+  font-size: 0.88rem;
+}
+
+.setting input[type="checkbox"] {
+  width: 22px;
+  min-height: 22px;
+  accent-color: var(--accent);
+}
+
 .switch {
   position: relative;
   flex: none;
@@ -1127,5 +1139,80 @@ select {
 
   .ticker {
     overflow-x: auto;
+  }
+}
+
+/* ───────────── Valor y revisión de marcas ───────────── */
+.value {
+  margin-top: 6px;
+}
+
+.value-pill {
+  min-height: 28px;
+  padding: 0 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-hi);
+  border-radius: 999px;
+  color: var(--muted);
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  cursor: pointer;
+}
+
+.value-pill.g-alto {
+  color: var(--accent);
+  border-color: var(--accent-dim);
+}
+
+.value-pill.g-bueno {
+  color: var(--text);
+}
+
+.value-pill.g-medio {
+  color: var(--amber);
+}
+
+.value-panel {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.factors {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.82rem;
+}
+
+.factors li {
+  display: grid;
+  grid-template-columns: 7.5rem 5rem 1fr;
+  align-items: center;
+  gap: 8px;
+}
+
+.tm h3 {
+  margin: 0 0 4px;
+  font-size: 0.9rem;
+}
+
+.tm .links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+@media (max-width: 480px) {
+  .factors li {
+    grid-template-columns: 6.5rem 3.5rem 1fr;
   }
 }

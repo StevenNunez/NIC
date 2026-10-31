@@ -46,6 +46,21 @@ const wbRows = [...names].flatMap((name) => {
   return [`UPDATE domains SET wb_checked_at = ${now}, wb_first = ${f}, wb_last = ${l}, wb_years = ${last - first + 1} WHERE name = '${name}';`];
 });
 
+// Casos para ver el puntaje de valor y la revisión de marcas: uno top, uno con marca famosa, uno malo.
+const valueCases = [
+  ["casa.cl", 22, "new"],
+  ["tienda.cl", 17, "favorite"],
+  ["nikestore.cl", 12, "new"],
+  ["xk-7-qzw-2024.cl", 0, "new"],
+].flatMap(([name, years, status], i) => {
+  const at = now - (i + 1) * 1800_000;
+  const f = Date.UTC(2026 - years, 2, 1);
+  return [
+    `INSERT OR IGNORE INTO domains (name, first_seen_at, first_seen_hour, baseline, status) VALUES ('${name}', ${at}, 10, 0, '${status}');`,
+    `UPDATE domains SET first_seen_at = ${at}, status = '${status}', wb_checked_at = ${now}, wb_first = ${years ? f : "NULL"}, wb_last = ${years ? Date.UTC(2025, 5, 1) : "NULL"}, wb_years = ${years} WHERE name = '${name}';`,
+  ];
+});
+
 const DAY = 86400_000;
 const ev = (name, at, kind, detail) =>
   `INSERT INTO watch_events (name, at, kind, detail) VALUES ('${name}', ${at}, '${kind}', ${detail ? `'${JSON.stringify(detail)}'` : "NULL"});`;
@@ -63,6 +78,12 @@ const pitutoExpires = releasedAt - 31 * DAY;
 const sql = [
   ...rows,
   ...wbRows,
+  ...valueCases,
+  // Revisiones de marca ya hechas a mano y una regla de patrón de ejemplo.
+  "DELETE FROM trademark_checks WHERE name IN ('casa.cl', 'tienda.cl', 'nikestore.cl');",
+  `INSERT INTO trademark_checks (name, status, note, checked_at) VALUES ('casa.cl', 'clear', 'INAPI: solo marcas compuestas, ninguna idéntica', ${now - 3600_000});`,
+  `INSERT INTO trademark_checks (name, status, note, checked_at) VALUES ('nikestore.cl', 'risk', 'Contiene la marca Nike (clase 25, vigente)', ${now - 7200_000});`,
+  `INSERT INTO meta (key, value) VALUES ('settings', '${JSON.stringify({ historyAlert: { enabled: true, minYears: 10, maxPer24h: 5 }, patterns: [{ id: "demo1", label: "4 letras sin números", enabled: true, minLen: 4, maxLen: 4, noDigit: true, noHyphen: true, startsWith: "", endsWith: "", contains: "" }] })}') ON CONFLICT(key) DO UPDATE SET value = excluded.value;`,
   // Consultas hechas a mano en la sección "el dominio ya no existe".
   "DELETE FROM lookups WHERE name IN ('tiendaalpina.cl', 'panaderiasur.cl', 'nuncaexistio-demo.cl');",
   `INSERT INTO lookups (name, whois_state, expires_at, created_on, wb_first, wb_last, wb_years, checked_at, created_at) VALUES ('tiendaalpina.cl', 'available', NULL, NULL, ${Date.UTC(2009, 5, 3)}, ${Date.UTC(2021, 10, 18)}, 13, ${now - 600_000}, ${now - 600_000});`,

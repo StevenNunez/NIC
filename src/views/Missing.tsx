@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { registerUrl, snapshotUrl } from "../../shared/domain";
 import { api, type LookupRow } from "../api";
 import { countdown, dateTime, historyLevel, timeAgo, yearRange } from "../format";
+import ValueInfo from "../components/ValueInfo";
 import Domains from "./Domains";
 
 type Tab = "lookups" | "released";
@@ -160,6 +161,8 @@ function LookupCard({ r, busy, onRefresh, onRemove, onWatch }: { r: LookupRow; b
           <span className="tld">.cl</span>
         </span>
       </div>
+
+      <ValueInfo name={r.name} wbYears={r.wbYears} />
 
       {free && <p className="verdict free">∅ el dominio ya no existe</p>}
       {taken && (

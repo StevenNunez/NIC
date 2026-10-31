@@ -1,8 +1,9 @@
 import { fetchWeeklyList } from "./nic.ts";
 import { notifyAll } from "./notify.ts";
-import { inDigestWindow, santiagoTime } from "./schedule.ts";
+import { inDigestWindow, isDaytime, santiagoTime } from "./schedule.ts";
 import { recordEvent } from "./events.ts";
 import { digestHistoryLine } from "./history-alerts.ts";
+import { findHits, patternMessage } from "./pattern-alerts.ts";
 import { getSettings } from "./settings.ts";
 import { alertDomain } from "./watch.ts";
 
@@ -49,6 +50,8 @@ export async function runPoll(env: Env): Promise<PollResult> {
       await env.DB.prepare("INSERT INTO meta (key, value) VALUES ('list_hash', ?1) ON CONFLICT(key) DO UPDATE SET value = ?1").bind(hash).run();
     }
 
+    if (added > 0 && !firstRun && isDaytime(time)) await alertPatterns(env, t0);
+
     const alerts = await alertWatchlist(env, new Set(domains), t0);
     await maybeSendDigest(env, t0, time.date, inDigestWindow(time), firstRun);
 
@@ -61,6 +64,21 @@ export async function runPoll(env: Env): Promise<PollResult> {
     await finish(env, result, true).catch(() => {});
     return result;
   }
+}
+
+/**
+ * Avisa de los dominios que esta pasada vio liberarse y calzan con alguna regla de patrón.
+ * De noche no suena: esos van en el resumen de la mañana. Una sola notificación por pasada.
+ */
+async function alertPatterns(env: Env, at: number): Promise<void> {
+  const { patterns } = await getSettings(env);
+  if (!patterns.some((r) => r.enabled)) return;
+  // Los recién agregados llevan la hora de esta pasada: el índice de first_seen_at lee solo esas filas.
+  const { results } = await env.DB.prepare("SELECT name FROM domains WHERE first_seen_at = ?1 AND baseline = 0 AND status != 'dismissed'").bind(at).all<{ name: string }>();
+  const hits = findHits(results.map((r) => r.name), patterns);
+  if (!hits.length) return;
+  const msg = patternMessage(hits);
+  await notifyAll(env, { ...msg, url: "/?v=new", tag: "pattern" }, "normal");
 }
 
 async function alertWatchlist(env: Env, listed: Set<string>, now: number): Promise<number> {
@@ -95,7 +113,8 @@ async function maybeSendDigest(env: Env, now: number, today: string, inWindow: b
       .all<{ name: string }>();
     const picks = results.map((r) => r.name).join(", ");
     // Lo que salió con historia (de noche, o sobre el tope diario) no tuvo aviso propio: va aquí.
-    const { historyAlert } = await getSettings(env);
+    const settings = await getSettings(env);
+    const { historyAlert } = settings;
     const { results: hist } = historyAlert.enabled
       ? await env.DB.prepare(
           `SELECT name, wb_years AS years FROM domains
@@ -105,9 +124,15 @@ async function maybeSendDigest(env: Env, now: number, today: string, inWindow: b
           .bind(since, historyAlert.minYears)
           .all<{ name: string; years: number }>()
       : { results: [] as { name: string; years: number }[] };
+    // Lo que calzó con un patrón mientras dormías (de noche no suena): se lista aquí.
+    const { patterns } = settings;
+    const { results: seen } = patterns.some((r) => r.enabled)
+      ? await env.DB.prepare("SELECT name FROM domains WHERE baseline = 0 AND first_seen_at > ?1 AND status != 'dismissed' LIMIT 3000").bind(since).all<{ name: string }>()
+      : { results: [] as { name: string }[] };
+    const patternHits = findHits(seen.map((r) => r.name), patterns);
     const delivered = await notifyAll(env, {
       title: `☀️ ${total} dominios liberados desde ayer`,
-      body: [hist.length ? digestHistoryLine(hist) : "", picks ? `Los más cortos: ${picks}` : ""].filter(Boolean).join("\n") || "Abre la app para ver el listado.",
+      body: [hist.length ? digestHistoryLine(hist) : "", patternHits.length ? `Tus patrones: ${patternHits.slice(0, 5).map((h) => h.name).join(", ")}${patternHits.length > 5 ? ` y ${patternHits.length - 5} más` : ""}` : "", picks ? `Los más cortos: ${picks}` : ""].filter(Boolean).join("\n") || "Abre la app para ver el listado.",
       url: "/?v=new",
       tag: "digest",
     });
